@@ -1,0 +1,18 @@
+version: '3.3'
+
+services:
+  test-app:
+    image: payments-bb-voucher-api-image
+    ports:
+      - 3333:3003
+    networks:
+      - web
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    volumes:
+      - ./mockoon-ibr.json:/mockoon-ibr.json
+
+networks:
+  web:
+    driver: bridge
