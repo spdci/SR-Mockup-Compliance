@@ -17,6 +17,6 @@ Dockerized instance of application is not hot-reloaded, therefore it's necessary
 
 
 # To Run the tests against ur specs 
-Go to [helpers](https://github.com/spdci/IBR-Mockup-Compliance/blob/master/test/features/support/helpers/helpers.js) and update the localhost url to point to your IBR URL. 
-Go to test folder and use shell script test_entrypoint.sh to run the tests against your api once test is complete in [result folder](https://github.com/spdci/IBR-Mockup-Compliance/tree/master/test/result)
+Go to [helpers](https://github.com/spdci/SR-Mockup-Compliance/blob/master/test/features/support/helpers/helpers.js) and update the localhost url to point to your IBR URL. 
+Go to test folder and use shell script test_entrypoint.sh to run the tests against your api once test is complete in [result folder](https://github.com/spdci/SR-Mockup-Compliance/tree/master/test/result)
 you should be able to see the testing results.
