@@ -55,8 +55,20 @@ Then(/^The unsubscribe response should have status (\d+)$/, async  function(stat
 
 // Then step: Validate header in the response
 Then(/^The unsubscribe response should have "([^"]*)": "([^"]*)" header$/, async function(key, value) {
-  chai.expect(this.response.rawHeaders).to.include(key);
-  //chai.expect(this.response.rawHeaders).to.include(value);
+  const headers = this.response.headers;
+
+    chai.expect(headers, 'Response headers missing').to.exist;
+
+    const actualValue = headers[key.toLowerCase()];
+    chai.expect(
+      actualValue,
+      `Expected header "${key}" to be present`
+    ).to.exist;
+
+    chai.expect(
+      actualValue,
+      `Expected header "${key}" to have value "${value}"`
+    ).to.include(value);
 });
 
 // Then step: Validate response time
