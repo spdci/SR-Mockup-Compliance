@@ -54,7 +54,7 @@ waitForAPI() {
 case "$1" in
   "run_tests" )
     waitForAPI
-    npx cucumber-js --format message:results/${RESULT_NAME}.message --format junit:results/${RESULT_NAME}.xml --format html:results/${RESULT_NAME}.html
+    npx cucumber-js ${CUCUMBER_TAGS:+--tags "$CUCUMBER_TAGS"} --format progress --format message:results/${RESULT_NAME}.message --format junit:results/${RESULT_NAME}.xml --format html:results/${RESULT_NAME}.html
     ;;
   * )
     show_help
