@@ -1,2 +1,2 @@
 chmod u+x entrypoint.sh
-docker-compose up -d --build test-app
+docker-compose up -d --build sr-mocks
