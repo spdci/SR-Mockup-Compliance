@@ -1,11 +1,7 @@
 version: '3.3'
 
-networks:
-  isolation-network:
-    driver: bridge
-
 services:
-  # Local test execution waits for API to be available and create test harnes report
+  # Waits for the API to be available, then runs the compliance suite and writes the report
   gherkin-test-report:
     image: gherkin-test-execution
     build:
@@ -15,8 +11,16 @@ services:
     environment:
       - RESULT_NAME=${RESULT_NAME:-example_result}
       - EXPORT_RESULTS=${EXPORT_SCRIPT:-docker/export_to_mongo.sh}
-      - NPM_REGISTRY=https://registry.npmjs.org/  
       - API_URL=${API_URL:-localhost:3333/healthcheck}
+      # Implementation under test (defaults: the bundled mocks)
+      - SR_BASE_URL=${SR_BASE_URL:-http://127.0.0.1:3333/}
+      - SP_BASE_URL=${SP_BASE_URL:-http://127.0.0.1:3334/}
+      # Listener receiving async callbacks; must be reachable from the SR under test
+      - CALLBACK_PORT=${CALLBACK_PORT:-3335}
+      - CALLBACK_BASE_URL=${CALLBACK_BASE_URL:-http://host.docker.internal:3335/}
+      - CUCUMBER_TAGS=${CUCUMBER_TAGS:-}
+      - TEST_DATA_FILE=${TEST_DATA_FILE:-}
+      - AUTH_TOKEN=${AUTH_TOKEN:-}
     volumes:
       - ./result/:/app/results
     network_mode: 'host'

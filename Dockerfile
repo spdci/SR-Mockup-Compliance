@@ -1,15 +1,20 @@
-FROM node:14-alpine
+FROM node:20-alpine
 
-RUN npm install -g @mockoon/cli@2.2.1
-COPY mockoon-sr.json ./mockoon-sr.json
-COPY entrypoint.sh ./entrypoint.sh
-# Do not run as root.
-RUN adduser --shell /bin/sh --disabled-password --gecos "" mockoon
-RUN chown -R mockoon ./mockoon-sr.json
-RUN chown -R mockoon ./entrypoint.sh
+# Mockoon CLI >= 9 is required (valid_json_schema rules, response callbacks)
+RUN npm install -g @mockoon/cli@9.2.0
+
+WORKDIR /mocks
+
+# SR (registry) side on 3003, SP (callback) side on 3004
+COPY mockoon-sr.json mockoon-sp.json entrypoint.sh ./
+
+# Do not run as root
+RUN adduser --shell /bin/sh --disabled-password --gecos "" mockoon \
+ && chown -R mockoon /mocks \
+ && chmod +x /mocks/entrypoint.sh
 
 USER mockoon
 
-EXPOSE 3003
+EXPOSE 3003 3004
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/mocks/entrypoint.sh"]

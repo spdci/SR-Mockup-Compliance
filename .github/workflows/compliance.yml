@@ -1,0 +1,186 @@
+# Runs the DCI SR compliance suite against the bundled Mockoon mocks and publishes the results:
+#  - a check run with one annotation per failed scenario (JUnit), and a job summary
+#  - the HTML / JUnit / Cucumber messages reports as a build artifact
+#  - on main, a GitHub Pages site with the HTML report and a Swagger UI of the SR API
+#    (Settings > Pages > Source: GitHub Actions); on pull requests the same site as an artifact
+name: SR compliance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: Cucumber tag expression (e.g. "@smoke", "not @callback"); empty runs everything
+        required: false
+        default: ''
+
+concurrency:
+  group: compliance-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MOCKOON_CLI_VERSION: 9.2.0
+  REPORT_NAME: sr-compliance
+
+jobs:
+  compliance:
+    name: Compliance suite (mocks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      checks: write          # publish the test result check run
+      pull-requests: write   # comment the result summary on pull requests
+    defaults:
+      run:
+        working-directory: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: test/package-lock.json
+
+      - name: Install test dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Check the mocks are up to date with the test schemas and fixtures
+        working-directory: .
+        run: |
+          node mock/generate-mocks.mjs
+          git diff --exit-code -- mockoon-sr.json mockoon-sp.json \
+            || { echo "::error::mockoon-*.json are out of date: run 'node mock/generate-mocks.mjs' and commit the result"; exit 1; }
+
+      - name: Start the SR (3333) and SP (3334) mocks
+        working-directory: .
+        run: |
+          nohup npx -y @mockoon/cli@${MOCKOON_CLI_VERSION} start \
+            --data mockoon-sr.json mockoon-sp.json --port 3333 3334 --disable-log-to-file \
+            > "$RUNNER_TEMP/mockoon.log" 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:3333/healthcheck >/dev/null && curl -sf http://127.0.0.1:3334/healthcheck >/dev/null && exit 0
+            sleep 1
+          done
+          echo "::error::Mocks did not start"; cat "$RUNNER_TEMP/mockoon.log"; exit 1
+
+      - name: Run the compliance suite
+        id: cucumber
+        env:
+          TAGS: ${{ github.event.inputs.tags }}
+        run: |
+          mkdir -p result
+          set +e
+          npx cucumber-js ${TAGS:+--tags "$TAGS"} \
+            --format progress \
+            --format "message:result/${REPORT_NAME}.message" \
+            --format "junit:result/${REPORT_NAME}.xml" \
+            --format "html:result/${REPORT_NAME}.html"
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Publish test results
+        if: always() && hashFiles('test/result/sr-compliance.xml') != ''
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          check_name: SR compliance results
+          files: test/result/${{ env.REPORT_NAME }}.xml
+          comment_mode: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'always' || 'off' }}
+          report_individual_runs: true
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sr-compliance-report
+          path: |
+            test/result/${{ env.REPORT_NAME }}.html
+            test/result/${{ env.REPORT_NAME }}.xml
+            test/result/${{ env.REPORT_NAME }}.message
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Build the site (landing page, test report, Swagger UI)
+        if: always() && steps.cucumber.outcome != 'skipped'
+        working-directory: .
+        run: |
+          node site/build-site.mjs --out "$RUNNER_TEMP/site" \
+            --report "test/result/${REPORT_NAME}.html" --junit "test/result/${REPORT_NAME}.xml"
+
+      - name: Upload the site (preview)
+        if: always() && hashFiles('test/result/sr-compliance.xml') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sr-compliance-site
+          path: ${{ runner.temp }}/site
+          retention-days: 14
+
+      - name: Upload the Pages site
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cucumber.outcome != 'skipped'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/site
+
+      - name: Mock logs
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/mockoon.log" || true
+
+      - name: Fail when scenarios failed
+        if: steps.cucumber.outputs.exit_code != '0'
+        run: |
+          echo "::error::Compliance suite failed (cucumber exit code ${{ steps.cucumber.outputs.exit_code }}). See the 'SR compliance results' check and the sr-compliance-report artifact."
+          exit 1
+
+  docker:
+    name: Docker images (mocks + test runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start the mocks
+        run: docker compose up -d --build --wait
+
+      - name: Run the compliance suite in its container
+        working-directory: test
+        env:
+          RESULT_NAME: sr-compliance-docker
+          CUCUMBER_TAGS: ${{ github.event.inputs.tags }}
+        run: docker compose up --build --exit-code-from gherkin-test-report gherkin-test-report
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sr-compliance-report-docker
+          path: test/result/sr-compliance-docker.*
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Mock logs
+        if: failure()
+        run: docker compose logs --tail 200
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down
+
+  pages:
+    name: Publish report to GitHub Pages
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.compliance.result != 'cancelled' && needs.compliance.result != 'skipped'
+    needs: compliance
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
